@@ -16,6 +16,8 @@
 # After each new comments session will send a report with new comments to email (in case new comments exists).
 
 # To allow Gmail service send mail, you should add this ability to Authorised Apps list in Google settings.
+# Allow less secure app
+# https://support.google.com/accounts/answer/6010255?hl=en
 # https://www.google.com/settings/security/lesssecureapps
 # https://security.google.com/settings/security/apppasswords
 
@@ -134,8 +136,13 @@ def parse_page(has_next_page=True, cursor=''):
     if has_next_page is True:
         user_url = url_user_detail_next_page % (username, cursor)
 
-        r = requests.get(user_url)
-        page_data = r.json()
+        r = try_request_get(user_url)
+
+        if r is not False:
+            page_data = r.json()
+        else:
+            print('We suddenly lost connection')
+            return False
 
         posts = page_data['user']['media']['nodes']
         cursor = page_data['user']['media']['page_info']['end_cursor']
@@ -183,16 +190,33 @@ def send_gmail(receiver, subject, text, html):
         print("failed to send mail")
 
 
+def try_request_get(url):
+    try:
+        return requests.get(url)
+    except:
+        print("internet connection failed")
+        return False
+
+
+def wait_message():
+    print("\n-------------------------------------------------- "
+          "\nInstagram comments checker launched and waiting "
+          "for scheduled time... \n" + a0 + "\n" + a1 + "\n" + a2 + "\n" + a3)
+
+    print("\n---> still working...\n\n\n")
+
 # ------- Service starts ------- >
 
-print("\nInstagram comments checker launched and waiting for scheduled time... \n" + a0 + "\n" + a1 + "\n" + a2 + "\n" + a3)
-print("\n---> still waiting...")
+
+wait_message()
+
+need_reconnect = False
 
 while True:
     now_time = datetime.datetime.now()
     tm = now_time.strftime("%H:%M:%S")
 
-    if tm == a0 or tm == a1 or tm == a2 or tm == a3:  # if True:  # debug fast start commented option
+    if tm == a0 or tm == a1 or tm == a2 or tm == a3 or need_reconnect is True:  # if True:  # debug fast start commented option
         print("! Instagram comments checker starts new check session at " + tm + " --->")
         list_of_user_media = []
         list_of_updated_media = []
@@ -202,8 +226,20 @@ while True:
         # 1. Check data about posts in remote site an local db
         # Request user page json
         user_url = url_user_detail % username
-        r = requests.get(user_url)
-        page_data = r.json()
+        r = try_request_get(user_url)
+        if r is not False:
+            need_reconnect = False
+            page_data = r.json()
+
+        else:
+            need_reconnect = True
+            print("Will try to reconnect after:")
+
+            for x in range(6):
+                print(x)
+                time.sleep(1)
+
+            continue
         media_count = int(page_data['user']['media']['count'])
 
         # Get media count info from database
@@ -228,7 +264,9 @@ while True:
         checked_posts_ids_in_this_session = []
 
         while page[0] is True:
+
             output = parse_page(page[0], page[1])
+
             print("Watching new %s page" % username)
             info = output['info']
             posts_dict = output['posts']
@@ -298,7 +336,22 @@ while True:
 
                     # Request media json page with comments
                     user_url = url_media_detail % post_code
-                    r = requests.get(user_url)
+
+                    r = try_request_get(user_url)
+                    if r is not False:
+                        need_reconnect = False
+                        page_data = r.json()
+
+                    else:
+                        need_reconnect = True
+                        print("Will try to reconnect after:")
+
+                        for x in range(6):
+                            print(x)
+                            time.sleep(1)
+
+                        continue
+
                     page_data = r.json()
 
                     # Set media vars
@@ -547,15 +600,13 @@ while True:
                 print("Trying to send letter at %s %s..." % (complete_time, complete_date))
                 send_gmail(target_email_address, complete_date + mail_title_string, text, html)
 
-                print("\n-------------------------------------------------- "
-                      "\nInstagram comments checker launched and waiting "
-                      "for scheduled time... \n" + a0 + "\n" + a1 + "\n" + a2 + "\n" + a3)
-
-                print("\n---> still waiting...\n\n\n")
+                wait_message()
             else:
                 print("There is no updates from other users.")
+                wait_message()
         else:
             #  Empty Letter send mail here
             print("There is no updates this time")
+            wait_message()
 
     time.sleep(1)
